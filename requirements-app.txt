@@ -1,0 +1,3 @@
+-r requirements.txt
+-r requirements-inpaint.txt
+gradio==6.27.0

@@ -4,18 +4,49 @@
 
 项目从视频中抽取候选帧，去除近重复和低质量画面，分别计算 CV 客观质量分数与 Qwen3-VL 主观审美分数，融合后选出具有时间多样性的 Top-K 高光画面。
 
-## 主要功能
+项目同时提供 Gradio 交互界面。用户可以从高光结果中选择图片、绘制局部蒙版，并使用 Stable Diffusion Inpainting 在本地 NVIDIA GPU 上进一步完善画面。
 
-- 按秒或帧间隔从视频中抽帧
-- 使用 perceptual hash 对连续近似帧分组
-- 使用 Laplacian variance 保留组内最清晰画面
-- 计算多项传统 CV 质量指标
-- 过滤黑屏、白屏、严重曝光异常和严重模糊画面
-- 计算 0～10 的 CV 客观质量分数
-- 使用 Qwen3-VL 评价构图、人物状态、光影和整体审美
-- 融合 CV 与 VLM 两类分数
-- 通过最小时间间隔约束选出 Top-K 高光画面
-- 将完整评分结果写入 JSON
+## 主要功能
+### 高光筛选
+
+- 视频抽帧与近似帧分组
+- 组内清晰帧选择
+- CV 质量过滤和客观评分
+- Qwen3-VL 主观评分
+- 多源分数融合与 Top-K 排序
+- JSON 结果输出
+
+### 局部重绘
+
+- Gradio 视频上传和 Gallery 展示
+- 高光图片选择与 ImageEditor 蒙版绘制
+- Stable Diffusion GPU 局部重绘
+- 保留蒙版外原始图像
+- 保存结果、蒙版和参数 JSON
+
+## 快速开始
+| 文件 | 用途 |
+|---|---|
+| `requirements.txt` | 高光筛选核心依赖 |
+| `requirements-inpaint.txt` | Stable Diffusion 局部重绘依赖 |
+| `requirements-app.txt` | 完整 Gradio 应用依赖 |
+安装完整依赖并配置 `DASHSCOPE_API_KEY` 后运行：
+
+```powershell
+python app.py
+```
+
+然后打开：
+
+```text
+http://127.0.0.1:7860
+```
+
+仅运行高光筛选 CLI：
+
+```powershell
+python -m src data/test.mp4 --output runs
+```
 
 ## Pipeline
 
@@ -45,6 +76,20 @@ CV / VLM 分数融合
 Top-K 高光画面
     ↓
 result.json
+    ↓
+Gradio Gallery 展示
+    ↓
+用户选择高光图片
+    ↓
+ImageEditor 绘制蒙版
+    ↓
+输入 prompt 与生成参数
+    ↓
+Stable Diffusion Inpainting
+    ↓
+蒙版外与原图重新合成
+    ↓
+重绘图片 + 蒙版 + 参数 JSON
 ```
 
 ## CV 指标
@@ -99,6 +144,11 @@ final_score = cv_score × 0.4 + vl_score × 0.6
 
 ```text
 multimodal-video-highlight-pipeline/
+├── app.py
+├── requirements.txt
+├── requirements-inpaint.txt
+├── requirements-app.txt
+│
 ├── src/
 │   ├── __init__.py
 │   ├── __main__.py
@@ -112,11 +162,12 @@ multimodal-video-highlight-pipeline/
 │   ├── vl_scorer.py
 │   ├── fusion.py
 │   ├── ranking.py
-│   └── pipeline.py
+│   ├── pipeline.py
+│   └── inpaint.py
 │
-├── data/
-├── runs/
-├── playground/
+├── data/          # 本地输入视频，不提交
+├── runs/          # 运行输出，不提交
+├── playground/    # 本地实验内容，不提交
 ├── .env.example
 ├── .gitignore
 └── README.md
@@ -137,14 +188,27 @@ multimodal-video-highlight-pipeline/
 | `fusion.py` | 融合 CV 和 VLM 分数 |
 | `ranking.py` | 排序、时间去重和 Top-K 选择 |
 | `pipeline.py` | 编排完整处理流程 |
+| `inpaint.py` | 加载本地重绘模型，执行局部重绘并保存结果 |
+| `app.py` | Gradio 交互界面，连接高光筛选与局部重绘 |
 | `__main__.py` | 命令行入口 |
 
 ## 环境要求
+
+### 高光筛选 CLI
 
 - Python 3.10 或更高版本
 - 可被 OpenCV 正常读取的视频文件
 - 可访问 Qwen3-VL 接口的 API Key
 - 网络连接
+
+### Gradio 与局部重绘
+
+- Python 3.10 或更高版本
+- NVIDIA GPU
+- 推荐至少 8 GB 显存
+- 支持 CUDA 的 PyTorch
+- Diffusers、Transformers、Accelerate 和 Gradio
+- 已存在于本机 Hugging Face 缓存中的 Stable Diffusion Inpainting 模型
 
 ## 安装
 
@@ -167,10 +231,33 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-安装项目依赖：
+### 仅安装高光筛选功能
 
 ```powershell
 python -m pip install -r requirements.txt
+```
+
+### 安装完整 Gradio 与 GPU 重绘功能
+
+首先根据显卡和驱动，从 PyTorch 官方渠道安装支持 CUDA 的 PyTorch。当前开发环境使用 CUDA 12.6：
+
+```powershell
+python -m pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cu126
+```
+
+然后安装应用依赖：
+
+```powershell
+python -m pip install -r requirements-app.txt
+```
+
+验证 CUDA：
+
+```powershell
+python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'NO GPU')"
+```
+
+`torch.cuda.is_available()` 应输出 `True`。
 
 ## API Key 配置
 
@@ -203,6 +290,8 @@ True
 该命令不会输出 Key 内容。
 
 ## 使用方法
+
+### 使用命令行
 
 查看所有命令行参数：
 
@@ -240,7 +329,7 @@ python -m src data/test.mp4 `
   --vl-weight 0.6
 ```
 
-## 命令行参数
+#### 命令行参数
 
 | 参数 | 默认值 | 说明 |
 |---|---:|---|
@@ -263,6 +352,31 @@ python -m src data/test.mp4 `
   --interval 30
 ```
 
+### 启动 Gradio 应用
+
+```powershell
+python app.py
+```
+
+应用默认只监听：
+
+```text
+http://127.0.0.1:7860
+```
+
+启动后：
+
+1. 上传视频。
+2. 设置抽帧间隔、Top-K 和最小时间间隔。
+3. 点击“开始高光筛选”。
+4. 从 Gallery 中选择一张高光图片。
+5. 使用白色画笔涂出需要重绘的区域。
+6. 输入重绘提示词和生成参数。
+7. 点击“开始局部重绘”。
+8. 查看结果并下载参数 JSON。
+
+视频分析会调用 Qwen3-VL，可能产生 API 用量。局部重绘在本地 NVIDIA GPU 上运行。
+
 ## 输出
 
 每次运行会创建独立目录：
@@ -272,8 +386,11 @@ runs/
 └── test_YYYYMMDD_HHMMSS_microseconds/
     ├── frame_00000000_000000.000s.jpg
     ├── frame_00000030_000001.000s.jpg
-    ├── ...
-    └── result.json
+    ├── result.json
+    └── edits/
+        ├── frame_xxxxxxxx.png
+        ├── frame_xxxxxxxx_mask.png
+        └── frame_xxxxxxxx.json
 ```
 
 `result.json` 包含：
@@ -289,6 +406,7 @@ runs/
 - `vl_score`
 - `final_score`
 - 最终选中的高光画面
+每次重绘都会生成唯一文件名，不会覆盖原始高光图片。重绘参数 JSON 包含源图片、模型名称、prompt、negative prompt、seed、strength、推理步数和 guidance scale。
 
 简化示例：
 
@@ -316,7 +434,15 @@ runs/
       "final_score": 8.52
     }
   ],
-  "selected_frames": []
+  "selected_frames": [
+  {
+    "frame_id": "frame_00000060_000002.000s",
+    "timestamp_sec": 2.0,
+    "cv_score": 8.7,
+    "vl_score": 8.4,
+    "final_score": 8.52
+  }
+]
 }
 ```
 
@@ -327,39 +453,50 @@ runs/
 - 当前输出的是高光图片，不是完整视频片段
 - 尚未实现片段截取和高光视频合并
 - VLM 请求按候选帧顺序执行，尚未并发
-- 尚未实现 VLM 响应缓存，重复运行可能重复产生 API 用量
-- CV 阈值和评分权重仍需要通过更多类型的视频校准
+- 尚未实现 VLM 响应缓存，重复分析可能产生额外 API 用量
+- CV 阈值和评分权重仍需通过更多类型的视频校准
 - 尚未使用音频、字幕、动作识别或物体检测
-- 尚未提供 GUI
+- 当前提供的是本地 Gradio 界面，尚未按生产环境部署
+- 重绘模型需要 NVIDIA GPU，目前没有 CPU 降级方案
+- 当前重绘模型以最长边 512 像素进行推理，大图重绘区域可能略软
+- 当前没有用户认证，不应直接暴露到公网
 - 尚未建立完整自动化测试
+
 
 ## Roadmap
 
-计划中的后续功能：
-
+- [x] 多阶段视频高光画面筛选
+- [x] CV 与 VLM 多源评分融合
+- [x] Gradio 本地交互界面
+- [x] 高光图片选择与蒙版绘制
+- [x] NVIDIA GPU 局部重绘
+- [x] 保存重绘结果、蒙版和参数
 - [ ] 缓存 CV 与 VLM 评分结果
 - [ ] 支持中断恢复
 - [ ] 根据高光时间点截取视频片段
 - [ ] 合并 Top-K 片段为高光视频
 - [ ] 增加场景切换和转场检测
-- [ ] 增加进度显示与日志
-- [ ] 增加单元测试和集成测试
-- [ ] 使用配置文件管理各项阈值
-- [ ] 增加批量视频处理
-- [ ] 完善依赖和打包配置
+- [ ] 增加自动化测试
+- [ ] 使用配置文件统一管理阈值
+- [ ] 支持批量视频处理
+- [ ] 完善模型下载与离线缓存管理
 
 ## 隐私与费用说明
 
-传统 CV 处理在本地完成。
+传统 CV 处理和 Stable Diffusion Inpainting 在本地完成。
 
-只有通过前置筛选的候选图片会发送到配置的 Qwen3-VL 服务进行评分。使用者应自行确认：
+只有通过前置筛选的候选图片会发送到配置的 Qwen3-VL 服务进行主观评分。重绘图片和蒙版不会由本项目主动上传到第三方服务。
 
-- API 服务的费用
-- 图片上传和数据保留政策
-- 视频内容是否允许上传到第三方服务
-- API Key 的权限和安全性
+请勿将以下内容提交到 Git：
 
-请勿将 `.env` 或真实 API Key 提交到仓库。
+- `.env`
+- API Key 或 Hugging Face Token
+- 用户上传的视频和图片
+- 重绘蒙版
+- `runs/` 中的生成结果
+- 本地模型权重
+
+> 当前开发版本默认从 Hugging Face 本地缓存加载模型，不会自动下载。运行重绘功能前，需要确保 `stable-diffusion-v1-5/stable-diffusion-inpainting` 已存在于本机 Hugging Face 缓存中。
 
 ## License
 
